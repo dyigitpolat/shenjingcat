@@ -69,7 +69,114 @@ def test(model, device, test_loader):
         100. * correct / len(test_loader.dataset)))
     return correct
 
+# TODO : ADD TYPES TO PARAMETERS
+def train_ann(train_set, test_set, ann_model, device, args):
+    train_loader = torch.utils.data.DataLoader(
+        train_set, batch_size=256+512, shuffle=True)
+    train_loader_ = torch.utils.data.DataLoader(train_set, batch_size=512, shuffle=True)
+    
+    test_loader = torch.utils.data.DataLoader(
+        test_set, batch_size=100, shuffle=False)
 
+    optimizer = optim.Adam(ann_model.parameters(), lr=args.lr)
+    scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
+
+    correct_ = 0
+    for epoch in range(1, args.epochs + 1):
+        train(args, ann_model, device, train_loader, optimizer, epoch)
+        test(ann_model, device, train_loader_)
+        correct = test(ann_model, device, test_loader)
+        if correct>correct_:
+            correct_ = correct
+        scheduler.step()
+    return
+
+# TODO : ADD TYPES TO PARAMETERS
+def transfer_weights(ann_model, snn_model):
+    model = fuse_bn_recursively(ann_model)
+    transfer_model(model, snn_model)
+
+    with torch.no_grad():
+        normalize_weight(snn_model.features, quantize_bit=8)
+    return
+
+# TODO : ADD TYPES TO PARAMETERS
+def run_on_snn(train_set, snn_model, time_window, device):
+    snn_dataset = SpikeDataset(train_set, T = time_window)
+    snn_loader = torch.utils.data.DataLoader(snn_dataset, batch_size=10, shuffle=False)
+
+    test(snn_model, device, snn_loader)
+    return 0
+
+# TODO : ADD TYPES TO PARAMETERS
+def augment_model(ann_model):
+    return
+
+# TODO : ADD TYPES TO PARAMETERS
+def freeze_layers(ann_model, layers_to_freeze):
+    for param in ann_model.parameters():
+        layer = 0 # TODO
+        if(layer in layers_to_freeze):
+            param.requires_grad = False
+    return
+
+# TODO : ADD TYPES TO PARAMETERS
+def unfreeze_layers(ann_model, layers_to_unfreeze):
+    for param in ann_model.parameters():
+        layer = 0 # TODO
+        if(layer in layers_to_unfreeze):
+            param.requires_grad = True
+    return
+
+# TODO : ADD TYPES TO PARAMETERS
+def phase_1(train_set, test_set, ann_model, snn_model, device, args):
+
+    print("    PHASE 1.1: TRAINING ANN MODEL")
+    train_ann        (train_set, test_set, ann_model, device, args)
+
+    print("    PHASE 1.2: TRANSFERRING WEIGHTS")
+    transfer_weights (ann_model, snn_model)
+    
+    print("    PHASE 1.3: RUNNING SNN")
+    out = run_on_snn (train_set, snn_model, device)
+    return out
+
+# TODO : ADD TYPES TO PARAMETERS
+def phase_2(snn_out_train_set, test_set, ann_model, ann_layers, device, args):
+
+    augment_model   (ann_model)
+
+    freeze_layers   (ann_model, ann_layers)
+    train_ann       (snn_out_train_set, test_set, ann_model, device, args) # support layers
+    unfreeze_layers (ann_model, ann_layers)
+    return
+
+# TODO : ADD TYPES TO PARAMETERS
+def phase_3(train_set, test_set, ann_model, snn_model, support_layers, device, args):
+
+    freeze_layers    (ann_model, support_layers)
+    train_ann        (train_set, test_set, ann_model, device, args) # ann layers
+    unfreeze_layers  (ann_model, support_layers)
+
+    transfer_weights (ann_model, snn_model)
+    return
+
+
+# TODO : ADD TYPES TO PARAMETERS
+def translate_model(train_set, test_set, ann_model, snn_model, device, args):
+    # ann layers
+    ann_layers = []
+
+    # support layers
+    support_layers = []
+
+    snn_out_train_set = phase_1(train_set, test_set, ann_model, snn_model, device, args)
+
+    # can increase these iterations
+    for i in range(1):
+        phase_2(snn_out_train_set, test_set, ann_model, ann_layers, device, args)
+        phase_3(train_set, test_set, ann_model, snn_model, support_layers, device, args)
+    return
 
 def main():
     # Training settings
@@ -167,6 +274,11 @@ def main():
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
 
+    phase_1(
+        train_set=trainset, test_set=testset, ann_model=model, 
+        snn_model=snn_model, device=device, args=args)
+    return
+
     correct_ = 0
     for epoch in range(1, args.epochs + 1):
         train(args, model, device, train_loader, optimizer, epoch)
@@ -187,106 +299,3 @@ def main():
 if __name__ == '__main__':
     main()
 
-# TODO : ADD TYPES TO PARAMETERS
-def train_ann(train_set, test_set, ann_model, device, args):
-    train_loader = torch.utils.data.DataLoader(
-        train_set, batch_size=256+512, shuffle=True)
-    train_loader_ = torch.utils.data.DataLoader(train_set, batch_size=512, shuffle=True)
-    
-    test_loader = torch.utils.data.DataLoader(
-        test_set, batch_size=100, shuffle=False)
-
-    optimizer = optim.Adam(ann_model.parameters(), lr=args.lr)
-    scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
-
-    correct_ = 0
-    for epoch in range(1, args.epochs + 1):
-        train(args, ann_model, device, train_loader, optimizer, epoch)
-        test(ann_model, device, train_loader_)
-        correct = test(ann_model, device, test_loader)
-        if correct>correct_:
-            correct_ = correct
-        scheduler.step()
-    return
-
-# TODO : ADD TYPES TO PARAMETERS
-def transfer_weights(ann_model, snn_model):
-    model = fuse_bn_recursively(ann_model)
-    transfer_model(model, snn_model)
-
-    with torch.no_grad():
-        normalize_weight(snn_model.features, quantize_bit=8)
-    return
-
-# TODO : ADD TYPES TO PARAMETERS
-def run_on_snn(train_set, snn_model, time_window, device):
-    snn_dataset = SpikeDataset(train_set, T = time_window)
-    snn_loader = torch.utils.data.DataLoader(snn_dataset, batch_size=10, shuffle=False)
-
-    test(snn_model, device, snn_loader)
-    return
-
-# TODO : ADD TYPES TO PARAMETERS
-def augment_model(ann_model):
-    return
-
-# TODO : ADD TYPES TO PARAMETERS
-def freeze_layers(ann_model, layers_to_freeze):
-    for param in ann_model.parameters():
-        layer = 0 # TODO
-        if(layer in layers_to_freeze):
-            param.requires_grad = False
-    return
-
-# TODO : ADD TYPES TO PARAMETERS
-def unfreeze_layers(ann_model, layers_to_unfreeze):
-    for param in ann_model.parameters():
-        layer = 0 # TODO
-        if(layer in layers_to_unfreeze):
-            param.requires_grad = True
-    return
-
-# TODO : ADD TYPES TO PARAMETERS
-def phase_1(train_set, test_set, ann_model, snn_model, device, args):
-
-    train_ann        (train_set, test_set, ann_model, device, args)
-    transfer_weights (ann_model, snn_model)
-    out = run_on_snn (train_set, snn_model, device)
-    return out
-
-# TODO : ADD TYPES TO PARAMETERS
-def phase_2(snn_out_train_set, test_set, ann_model, ann_layers, device, args):
-
-    augment_model   (ann_model)
-
-    freeze_layers   (ann_model, ann_layers)
-    train_ann       (snn_out_train_set, test_set, ann_model, device, args) # support layers
-    unfreeze_layers (ann_model, ann_layers)
-    return
-
-# TODO : ADD TYPES TO PARAMETERS
-def phase_3(train_set, test_set, ann_model, snn_model, support_layers, device, args):
-
-    freeze_layers    (ann_model, support_layers)
-    train_ann        (train_set, test_set, ann_model, device, args) # ann layers
-    unfreeze_layers  (ann_model, support_layers)
-
-    transfer_weights (ann_model, snn_model)
-    return
-
-
-# TODO : ADD TYPES TO PARAMETERS
-def translate_model(train_set, test_set, ann_model, snn_model, device, args):
-    # ann layers
-    ann_layers = []
-
-    # support layers
-    support_layers = []
-
-    snn_out_train_set = phase_1(train_set, test_set, ann_model, snn_model, device, args)
-
-    # can increase these iterations
-    for i in range(1):
-        phase_2(snn_out_train_set, test_set, ann_model, ann_layers, device, args)
-        phase_3(train_set, test_set, ann_model, snn_model, support_layers, device, args)
-    return
