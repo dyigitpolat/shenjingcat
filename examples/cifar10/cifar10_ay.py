@@ -1,301 +1,119 @@
-from __future__ import print_function
-import os
-os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
-import argparse
-import numpy as np
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
-from torchvision import datasets, transforms
-from torch.optim.lr_scheduler import StepLR
-from catSNN import spikeLayer, transfer_model, load_model, max_weight, normalize_weight, SpikeDataset ,fuse_bn_recursively, fuse_module
-from utils import to_tensor
-
-class AddGaussianNoise(object):
-    def __init__(self, mean=0., std=1.):
-        self.std = std
-        self.mean = mean
-        
-    def __call__(self, tensor):
-        return tensor + torch.randn(tensor.size()) * self.std + self.mean
-    
-    def __repr__(self):
-        return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
-
-def Initialize_trainable_pooling(feature):
-    datashape = feature.shape
-    for i in range(datashape[0]):
-        for j in range(datashape[1]):
-            feature[i][j] = torch.Tensor(0.25*np.ones((2,2)))
-    return nn.Parameter(feature, requires_grad=True)
-
-def train(args, model, device, train_loader, optimizer, epoch):
-    model.train()
-    for batch_idx, (data, target) in enumerate(train_loader):
-        data, target = data.to(device), target.to(device)
-        onehot = torch.nn.functional.one_hot(target, 10)
-        optimizer.zero_grad()
-        output = model(data)
-        loss = F.cross_entropy(output, target)
-        loss.backward()
-        optimizer.step()
-        if batch_idx % args.log_interval == 0:
-            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                epoch, batch_idx * len(data), len(train_loader.dataset),
-                100. * batch_idx / len(train_loader), loss.item()))
-            if args.dry_run:
-                break
-
-
-def test(model, device, test_loader):
-    model.eval()
-    test_loss = 0
-    correct = 0
-    with torch.no_grad():
-        for data, target in test_loader:
-            data, target = data.to(device), target.to(device)
-            onehot = torch.nn.functional.one_hot(target, 10)
-            output = model(data)
-            test_loss += F.cross_entropy(output, target, reduction='sum').item()  # sum up batch loss
-            pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
-            correct += pred.eq(target.view_as(pred)).sum().item()
-        
-
-    test_loss /= len(test_loader.dataset)
-
-    print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
-        test_loss, correct, len(test_loader.dataset),
-        100. * correct / len(test_loader.dataset)))
-    return correct
-
-# TODO : ADD TYPES TO PARAMETERS
-def train_ann(train_set, test_set, ann_model, device, args):
-    train_loader = torch.utils.data.DataLoader(
-        train_set, batch_size=256+512, shuffle=True)
-    train_loader_ = torch.utils.data.DataLoader(train_set, batch_size=512, shuffle=True)
-    
-    test_loader = torch.utils.data.DataLoader(
-        test_set, batch_size=100, shuffle=False)
-
-    optimizer = optim.Adam(ann_model.parameters(), lr=args.lr)
-    scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
-
-    correct_ = 0
-    for epoch in range(1, args.epochs + 1):
-        train(args, ann_model, device, train_loader, optimizer, epoch)
-        test(ann_model, device, train_loader_)
-        correct = test(ann_model, device, test_loader)
-        if correct>correct_:
-            correct_ = correct
-        scheduler.step()
-    return
-
-# TODO : ADD TYPES TO PARAMETERS
-def transfer_weights(ann_model, snn_model):
-    model = fuse_bn_recursively(ann_model)
-    transfer_model(model, snn_model)
-
-    with torch.no_grad():
-        normalize_weight(snn_model.features, quantize_bit=8)
-    return
-
-# TODO : ADD TYPES TO PARAMETERS
-def run_on_snn(train_set, snn_model, time_window, device):
-    snn_dataset = SpikeDataset(train_set, T = time_window)
-    snn_loader = torch.utils.data.DataLoader(snn_dataset, batch_size=10, shuffle=False)
-
-    test(snn_model, device, snn_loader)
-    return 0
-
-# TODO : ADD TYPES TO PARAMETERS
-def augment_model(ann_model):
-    return
-
-# TODO : ADD TYPES TO PARAMETERS
-def freeze_layers(ann_model, layers_to_freeze):
-    for param in ann_model.parameters():
-        layer = 0 # TODO
-        if(layer in layers_to_freeze):
-            param.requires_grad = False
-    return
-
-# TODO : ADD TYPES TO PARAMETERS
-def unfreeze_layers(ann_model, layers_to_unfreeze):
-    for param in ann_model.parameters():
-        layer = 0 # TODO
-        if(layer in layers_to_unfreeze):
-            param.requires_grad = True
-    return
-
-# TODO : ADD TYPES TO PARAMETERS
-def phase_1(train_set, test_set, ann_model, snn_model, device, args):
-
-    print("    PHASE 1.1: TRAINING ANN MODEL")
-    train_ann        (train_set, test_set, ann_model, device, args)
-
-    print("    PHASE 1.2: TRANSFERRING WEIGHTS")
-    transfer_weights (ann_model, snn_model)
-    
-    print("    PHASE 1.3: RUNNING SNN")
-    out = run_on_snn (train_set, snn_model, device)
-    return out
-
-# TODO : ADD TYPES TO PARAMETERS
-def phase_2(snn_out_train_set, test_set, ann_model, ann_layers, device, args):
-
-    augment_model   (ann_model)
-
-    freeze_layers   (ann_model, ann_layers)
-    train_ann       (snn_out_train_set, test_set, ann_model, device, args) # support layers
-    unfreeze_layers (ann_model, ann_layers)
-    return
-
-# TODO : ADD TYPES TO PARAMETERS
-def phase_3(train_set, test_set, ann_model, snn_model, support_layers, device, args):
-
-    freeze_layers    (ann_model, support_layers)
-    train_ann        (train_set, test_set, ann_model, device, args) # ann layers
-    unfreeze_layers  (ann_model, support_layers)
-
-    transfer_weights (ann_model, snn_model)
-    return
-
-
-# TODO : ADD TYPES TO PARAMETERS
-def translate_model(train_set, test_set, ann_model, snn_model, device, args):
-    # ann layers
-    ann_layers = []
-
-    # support layers
-    support_layers = []
-
-    snn_out_train_set = phase_1(train_set, test_set, ann_model, snn_model, device, args)
-
-    # can increase these iterations
-    for i in range(1):
-        phase_2(snn_out_train_set, test_set, ann_model, ann_layers, device, args)
-        phase_3(train_set, test_set, ann_model, snn_model, support_layers, device, args)
-    return
+from cifar10_utils import *
+from torchsummary import summary
 
 def main():
-    # Training settings
-    parser = argparse.ArgumentParser(description='PyTorch Cifar10 LeNet Example')
-    parser.add_argument('--batch-size', type=int, default=64, metavar='N',
-                        help='input batch size for training (default: 64)')
-    parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N',
-                        help='input batch size for testing (default: 1000)')
-    parser.add_argument('--epochs', type=int, default=14, metavar='N',
-                        help='number of epochs to train (default: 14)')
-    parser.add_argument('--lr', type=float, default=1e-3, metavar='LR',
-                        help='learning rate (default: 1)')
-    parser.add_argument('--gamma', type=float, default=0.7, metavar='M',
-                        help='Learning rate step gamma (default: 0.7)')
-    parser.add_argument('--no-cuda', action='store_true', default=False,
-                        help='disables CUDA training')
-    parser.add_argument('--dry-run', action='store_true', default=False,
-                        help='quickly check a single pass')
-    parser.add_argument('--seed', type=int, default=1, metavar='S',
-                        help='random seed (default: 1)')
-    parser.add_argument('--log-interval', type=int, default=10, metavar='N',
-                        help='how many batches to wait before logging training status')
-    parser.add_argument('--save-model', action='store_true', default=False,
-                        help='For Saving the current Model')
-    parser.add_argument('--resume', type=str, default=None, metavar='RESUME',
-                        help='Resume model from checkpoint')
-    parser.add_argument('--T', type=int, default=1000, metavar='N',
-                        help='SNN time window')
-    parser.add_argument('--k', type=int, default=20, metavar='N',
-                        help='Data augmentation')
-
-    args = parser.parse_args()
+    args = retrieve_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
-
     torch.manual_seed(args.seed)
-
     device = torch.device("cuda" if use_cuda else "cpu")
 
-    kwargs = {'batch_size': args.batch_size}
-    if use_cuda:
-        kwargs.update({'num_workers': 1,
-                       'pin_memory': True,
-                       'shuffle': True},
-                     )
+    base_model_path = "examples/cifar10/model88Q.bin"
+    new_base_model_path = "examples/cifar10/new_base.bin"
+    snn_output_npy_path = "examples/cifar10/outputs_.npy"
+    snn_loop_output_npy_path = "examples/cifar10/outputs_loop.npy"
 
-    transform_train = transforms.Compose([
-        transforms.RandomCrop(32, padding=6),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        AddGaussianNoise(std=0.01)
-        ])
-
-    transform_test = transforms.Compose([
-        transforms.ToTensor()
-        ])
-
-    trainset = datasets.CIFAR10(
-        root='./data', train=True, download=True, transform=transform_train)
-    train_loader_ = torch.utils.data.DataLoader(trainset, batch_size=512, shuffle=True)
-       
-    for i in range(args.k):
-
-        im_aug = transforms.Compose([
-        transforms.RandomRotation(10),
-        transforms.RandomCrop(32, padding = 6),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        AddGaussianNoise(std=0.01)
-        ])
-        trainset = trainset + datasets.CIFAR10(root='./data', train=True, download=True, transform=im_aug)
+    # try:
+    #     model = torch.load(new_base_model_path)
+    #     model.eval()
+    # except:
+    #     exit()
     
-    train_loader = torch.utils.data.DataLoader(
-        trainset, batch_size=256+512, shuffle=True)
-
-    testset = datasets.CIFAR10(
-        root='./data', train=False, download=False, transform=transform_test)
-    test_loader = torch.utils.data.DataLoader(
-        testset, batch_size=100, shuffle=False)
-
-    snn_dataset = SpikeDataset(testset, T = args.T)
-    snn_loader = torch.utils.data.DataLoader(snn_dataset, batch_size=10, shuffle=False)
-
-    from models.vgg import VGG, VGG_,CatVGG,CatVGG_
+    # evaluate_on_snn(
+    #     create_base_from(model, device), 
+    #     args.T, 
+    #     generate_output_npy=False, 
+    #     save_path="", 
+    #     device=device)
     
-    model = VGG('VGG19', clamp_max=1, quantize_bit=32,bias =False).to(device)
-    snn_model = CatVGG('VGG19', args.T,bias =True).to(device)
+    # exit()
 
-    #Trainable pooling
-    #model = VGG_('VGG19_', clamp_max=1, quantize_bit=32,bias =True).to(device)
-    #snn_model = CatVGG_('VGG19_', args.T,bias =True).to(device)
-
-    if args.resume != None:
-        model.load_state_dict(torch.load(args.resume), strict=False)
+    try:
+        model = torch.load(base_model_path)
+        model.eval()
+    except:
+        exit()
     
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
-    scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
+    # 0
+    # train_on_cifar10(model, args.batch_size, args.k, args.lr, args.gamma, args.epochs, args.log_interval, device)
 
-    phase_1(
-        train_set=trainset, test_set=testset, ann_model=model, 
-        snn_model=snn_model, device=device, args=args)
-    return
+    evaluate_on_snn(
+        create_base_from(model, device), 
+        args.T, 
+        generate_output_npy=False, 
+        save_path=snn_loop_output_npy_path, 
+        device=device)
+    
+    exit()
 
-    correct_ = 0
-    for epoch in range(1, args.epochs + 1):
-        train(args, model, device, train_loader, optimizer, epoch)
-        test(model, device, train_loader_)
-        correct = test(model, device, test_loader)
-        if correct>correct_:
-            correct_ = correct
-        scheduler.step()
+    # 1
+    freeze_base(model, device)
+    augment_model(model, device)
 
-    model = fuse_bn_recursively(model)
-    transfer_model(model, snn_model)
-    with torch.no_grad():
-        normalize_weight(snn_model.features, quantize_bit=8)
-    test(snn_model, device, snn_loader)
+    # 2
+    model.eval()
+    summary(model, (3,32,32))
+    train_on_snn_output(model, np.load(snn_loop_output_npy_path), args.batch_size, args.lr, args.gamma, args.epochs, args.log_interval, device)
 
+    # 3
+    validate_base_vs_tuned(model, base_model_path, device)
 
+    # 4 
+    unfreeze_base(model, device)
+    freeze_support(model, device)
+    train_on_cifar10(model, args.batch_size, args.k, args.lr, args.gamma, args.epochs, args.log_interval, device)
+    save_as_new_base(model, new_base_model_path, device)
+
+    # 5
+    evaluate_on_snn(
+        create_base_from(model, device), 
+        args.T, 
+        generate_output_npy=True, 
+        save_path=snn_loop_output_npy_path, 
+        device=device)
+
+    # LOOP NOW (meditative repression)
+    for i in range(args.loops):
+        try:
+            model = torch.load(new_base_model_path)
+            model.eval()
+        except:
+            exit()
+
+        # 1
+        freeze_base(model, device)
+        augment_model(model, device)
+        unfreeze_support(model, device)
+
+        # 2
+        model.eval()
+        summary(model, (3,32,32))
+        scaled_epochs = args.epochs
+        train_on_snn_output(model, np.load(snn_loop_output_npy_path), args.batch_size, args.lr, args.gamma, scaled_epochs, args.log_interval, device)
+
+        # 3
+        validate_base_vs_tuned(model, new_base_model_path, device)
+
+        # 4 
+        unfreeze_base(model, device)
+        freeze_support(model, device)
+        train_on_cifar10(model, args.batch_size, args.k, args.lr, args.gamma, args.epochs, args.log_interval, device)
+        save_as_new_base(model, new_base_model_path, device)
+
+        # 5
+        evaluate_on_snn(
+            create_base_from(model, device), 
+            args.T, 
+            generate_output_npy=True, 
+            save_path=snn_loop_output_npy_path, 
+            device=device)
+
+    evaluate_on_snn(
+        create_base_from(model, device), 
+        args.T, 
+        generate_output_npy=False, 
+        save_path="", 
+        device=device)
 
 if __name__ == '__main__':
     main()
-
+    
