@@ -484,6 +484,8 @@ def validate_base_vs_tuned(tuned_model :VGG, base_model_path :str, device :torch
     print("validating tuned performance")
     orig_model.eval()
     test(orig_model, device, test_loader)
+def create_base():
+    return VGG('VGG16', clamp_max=1.0, quantize_bit=32,bias =False)
 
 def create_base_from(model :VGG, device :torch.device):
     new_base_model = VGG('VGG16', clamp_max=1.0, quantize_bit=32,bias =False)
@@ -567,6 +569,8 @@ def retrieve_args():
                         help='Data augmentation')
     parser.add_argument('--loops', type=int, default=0, metavar='N',
                         help='loops count')
+    parser.add_argument('--from-scratch', type=int, default=0, metavar='N',
+                        help='to train from scratch or load model')
     
     args = parser.parse_args()
     

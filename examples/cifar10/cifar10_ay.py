@@ -5,7 +5,7 @@ def main():
     args = retrieve_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     torch.manual_seed(args.seed)
-    device = torch.device("cuda" if use_cuda else "cpu")
+    device = torch.device("cuda" if use_cuda else "cpu", 0)
 
     base_model_path = "examples/cifar10/model88Q.bin"
     new_base_model_path = "examples/cifar10/new_base.bin"
@@ -27,23 +27,24 @@ def main():
     
     # exit()
 
-    try:
-        model = torch.load(base_model_path)
-        model.eval()
-    except:
-        exit()
-    
-    # 0
-    # train_on_cifar10(model, args.batch_size, args.k, args.lr, args.gamma, args.epochs, args.log_interval, device)
+    if(args.from_scratch == 1):
+        model = create_base()
+        train_on_cifar10(model, args.batch_size, args.k, args.lr, args.gamma, args.epochs, args.log_interval, device)
+    else:
+        try:
+            model = torch.load(base_model_path)
+            model.eval()
+        except:
+            print("couldn't load base model")
+            exit()
 
+    # 0
     evaluate_on_snn(
         create_base_from(model, device), 
         args.T, 
-        generate_output_npy=False, 
+        generate_output_npy=True, 
         save_path=snn_loop_output_npy_path, 
         device=device)
-    
-    exit()
 
     # 1
     freeze_base(model, device)
