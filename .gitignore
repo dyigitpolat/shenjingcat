@@ -149,3 +149,4 @@ data/
 # binaries
 *.bin
 *.npy
+*.pt

@@ -19,6 +19,7 @@ import torch.utils.data.dataloader
 import torch.utils.data.dataset
 
 from models.vgg import VGG, VGG_,CatVGG,CatVGG_
+from models.vgg_onlyt import VGG_o, CatVGG_o
 
 class AddGaussianNoise(object):
     def __init__(self, mean=0., std=1.):
@@ -174,7 +175,7 @@ def get_cifar10_testset():
 def get_cifar10_trainset_loader_with_snn_labels():
     pass
 
-def set_trainable_base(model :VGG, is_trainable :bool, device :torch.device):
+def set_trainable_base(model :VGG_o, is_trainable :bool, device :torch.device):
     model.cpu()
 
     model.features[0].requires_grad_(is_trainable)
@@ -205,7 +206,7 @@ def set_trainable_base(model :VGG, is_trainable :bool, device :torch.device):
     model.to(device)
     pass
 
-def set_trainable_support(model :VGG, is_trainable :bool, device :torch.device):
+def set_trainable_support(model :VGG_o, is_trainable :bool, device :torch.device):
     model.cpu()
 
     for f in model.features[62]:
@@ -230,19 +231,19 @@ def set_trainable_support(model :VGG, is_trainable :bool, device :torch.device):
     model.to(device)
     pass
 
-def freeze_base(model :VGG, device :torch.device):
+def freeze_base(model :VGG_o, device :torch.device):
     set_trainable_base(model, False, device)
 
-def unfreeze_base(model :VGG, device :torch.device):
+def unfreeze_base(model :VGG_o, device :torch.device):
     set_trainable_base(model, True, device)
 
-def freeze_support(model :VGG, device :torch.device):
+def freeze_support(model :VGG_o, device :torch.device):
     set_trainable_support(model, False, device)
 
-def unfreeze_support(model :VGG, device :torch.device):
+def unfreeze_support(model :VGG_o, device :torch.device):
     set_trainable_support(model, True, device)
 
-def augment_model(model :VGG, device :torch.device):
+def augment_model(model :VGG_o, device :torch.device):
     model.cpu()
 
     # augment model
@@ -268,12 +269,14 @@ def augment_model(model :VGG, device :torch.device):
     model.to(device)
     pass
 
-def transfer_base_params(dst_model :VGG, src_model :VGG, device :torch.device):
+def transfer_base_params(dst_model :VGG_o, src_model :VGG_o, device :torch.device):
     dst_model.cpu()
     src_model.cpu()
 
     with torch.no_grad():
         dst_model.features[0].weight.copy_(src_model.features[0].weight)
+        dst_model.features[0].bias.copy_(src_model.features[0].bias)
+
         dst_model.features[1].weight.copy_(src_model.features[1].weight)
         dst_model.features[1].bias.copy_(src_model.features[1].bias)
         dst_model.features[1].running_mean.copy_(src_model.features[1].running_mean)
@@ -281,6 +284,8 @@ def transfer_base_params(dst_model :VGG, src_model :VGG, device :torch.device):
         dst_model.features[1].num_batches_tracked.copy_(src_model.features[1].num_batches_tracked)
 
         dst_model.features[4].weight.copy_(src_model.features[4].weight)
+        dst_model.features[4].bias.copy_(src_model.features[4].bias)
+
         dst_model.features[5].weight.copy_(src_model.features[5].weight)
         dst_model.features[5].bias.copy_(src_model.features[5].bias)
         dst_model.features[5].running_mean.copy_(src_model.features[5].running_mean)
@@ -288,6 +293,8 @@ def transfer_base_params(dst_model :VGG, src_model :VGG, device :torch.device):
         dst_model.features[5].num_batches_tracked.copy_(src_model.features[5].num_batches_tracked)
 
         dst_model.features[10].weight.copy_(src_model.features[10].weight)
+        dst_model.features[10].bias.copy_(src_model.features[10].bias)
+
         dst_model.features[11].weight.copy_(src_model.features[11].weight)
         dst_model.features[11].bias.copy_(src_model.features[11].bias)
         dst_model.features[11].running_mean.copy_(src_model.features[11].running_mean)
@@ -295,6 +302,8 @@ def transfer_base_params(dst_model :VGG, src_model :VGG, device :torch.device):
         dst_model.features[11].num_batches_tracked.copy_(src_model.features[11].num_batches_tracked)
 
         dst_model.features[14].weight.copy_(src_model.features[14].weight)
+        dst_model.features[14].bias.copy_(src_model.features[14].bias)
+
         dst_model.features[15].weight.copy_(src_model.features[15].weight)
         dst_model.features[15].bias.copy_(src_model.features[15].bias)
         dst_model.features[15].running_mean.copy_(src_model.features[15].running_mean)
@@ -302,6 +311,8 @@ def transfer_base_params(dst_model :VGG, src_model :VGG, device :torch.device):
         dst_model.features[15].num_batches_tracked.copy_(src_model.features[15].num_batches_tracked)
 
         dst_model.features[20].weight.copy_(src_model.features[20].weight)
+        dst_model.features[20].bias.copy_(src_model.features[20].bias)
+
         dst_model.features[21].weight.copy_(src_model.features[21].weight)
         dst_model.features[21].bias.copy_(src_model.features[21].bias)
         dst_model.features[21].running_mean.copy_(src_model.features[21].running_mean)
@@ -309,68 +320,31 @@ def transfer_base_params(dst_model :VGG, src_model :VGG, device :torch.device):
         dst_model.features[21].num_batches_tracked.copy_(src_model.features[21].num_batches_tracked)
 
         dst_model.features[24].weight.copy_(src_model.features[24].weight)
+        dst_model.features[24].bias.copy_(src_model.features[24].bias)
+
         dst_model.features[25].weight.copy_(src_model.features[25].weight)
         dst_model.features[25].bias.copy_(src_model.features[25].bias)
         dst_model.features[25].running_mean.copy_(src_model.features[25].running_mean)
         dst_model.features[25].running_var.copy_(src_model.features[25].running_var)
         dst_model.features[25].num_batches_tracked.copy_(src_model.features[25].num_batches_tracked)
 
-        dst_model.features[28].weight.copy_(src_model.features[28].weight)
-        dst_model.features[29].weight.copy_(src_model.features[29].weight)
-        dst_model.features[29].bias.copy_(src_model.features[29].bias)
-        dst_model.features[29].running_mean.copy_(src_model.features[29].running_mean)
-        dst_model.features[29].running_var.copy_(src_model.features[29].running_var)
-        dst_model.features[29].num_batches_tracked.copy_(src_model.features[29].num_batches_tracked)
+        dst_model.features[30].weight.copy_(src_model.features[30].weight)
+        dst_model.features[30].bias.copy_(src_model.features[30].bias)
 
-        dst_model.features[34].weight.copy_(src_model.features[34].weight)
-        dst_model.features[35].weight.copy_(src_model.features[35].weight)
-        dst_model.features[35].bias.copy_(src_model.features[35].bias)
-        dst_model.features[35].running_mean.copy_(src_model.features[35].running_mean)
-        dst_model.features[35].running_var.copy_(src_model.features[35].running_var)
-        dst_model.features[35].num_batches_tracked.copy_(src_model.features[35].num_batches_tracked)
-
-        dst_model.features[38].weight.copy_(src_model.features[38].weight)
-        dst_model.features[39].weight.copy_(src_model.features[39].weight)
-        dst_model.features[39].bias.copy_(src_model.features[39].bias)
-        dst_model.features[39].running_mean.copy_(src_model.features[39].running_mean)
-        dst_model.features[39].running_var.copy_(src_model.features[39].running_var)
-        dst_model.features[39].num_batches_tracked.copy_(src_model.features[39].num_batches_tracked)
-
-        dst_model.features[42].weight.copy_(src_model.features[42].weight)
-        dst_model.features[43].weight.copy_(src_model.features[43].weight)
-        dst_model.features[43].bias.copy_(src_model.features[43].bias)
-        dst_model.features[43].running_mean.copy_(src_model.features[43].running_mean)
-        dst_model.features[43].running_var.copy_(src_model.features[43].running_var)
-        dst_model.features[43].num_batches_tracked.copy_(src_model.features[43].num_batches_tracked)
-
-        dst_model.features[48].weight.copy_(src_model.features[48].weight)
-        dst_model.features[49].weight.copy_(src_model.features[49].weight)
-        dst_model.features[49].bias.copy_(src_model.features[49].bias)
-        dst_model.features[49].running_mean.copy_(src_model.features[49].running_mean)
-        dst_model.features[49].running_var.copy_(src_model.features[49].running_var)
-        dst_model.features[49].num_batches_tracked.copy_(src_model.features[49].num_batches_tracked)
-
-        dst_model.features[52].weight.copy_(src_model.features[52].weight)
-        dst_model.features[53].weight.copy_(src_model.features[53].weight)
-        dst_model.features[53].bias.copy_(src_model.features[53].bias)
-        dst_model.features[53].running_mean.copy_(src_model.features[53].running_mean)
-        dst_model.features[53].running_var.copy_(src_model.features[53].running_var)
-        dst_model.features[53].num_batches_tracked.copy_(src_model.features[53].num_batches_tracked)
-
-        dst_model.features[56].weight.copy_(src_model.features[56].weight)
-        dst_model.features[57].weight.copy_(src_model.features[57].weight)
-        dst_model.features[57].bias.copy_(src_model.features[57].bias)
-        dst_model.features[57].running_mean.copy_(src_model.features[57].running_mean)
-        dst_model.features[57].running_var.copy_(src_model.features[57].running_var)
-        dst_model.features[57].num_batches_tracked.copy_(src_model.features[57].num_batches_tracked)
+        dst_model.features[31].weight.copy_(src_model.features[31].weight)
+        dst_model.features[31].bias.copy_(src_model.features[31].bias)
+        dst_model.features[31].running_mean.copy_(src_model.features[31].running_mean)
+        dst_model.features[31].running_var.copy_(src_model.features[31].running_var)
+        dst_model.features[31].num_batches_tracked.copy_(src_model.features[31].num_batches_tracked)
 
         dst_model.classifier.weight.copy_(src_model.classifier.weight)
+        dst_model.classifier.bias.copy_(src_model.classifier.bias)
     
     src_model.to(device)
     dst_model.to(device)
     pass
 
-def train_on_snn_output(model :VGG, snn_output_npy :np.ndarray, batch_size, lr, step_gamma, epochs, log_interval, device :torch.device):
+def train_on_snn_output(model :VGG_o, snn_output_npy :np.ndarray, batch_size, lr, step_gamma, epochs, log_interval, device :torch.device):
     model.to(device)
     
     outputs = snn_output_npy
@@ -463,7 +437,7 @@ def train_on_cifar10(model, batch_size, aug_k, lr, step_gamma, epochs, log_inter
             print("step!")
     pass
 
-def validate_base_vs_tuned(tuned_model :VGG, base_model_path :str, device :torch.device):
+def validate_base_vs_tuned(tuned_model :VGG_o, base_model_path :str, device :torch.device):
     transform_train_plain = transforms.Compose([
         transforms.ToTensor()
         ])
@@ -473,7 +447,9 @@ def validate_base_vs_tuned(tuned_model :VGG, base_model_path :str, device :torch
         testset, batch_size=100, shuffle=False)
     try:
         print("original performance:")
-        orig_model = torch.load(base_model_path).to(device)
+        orig_model = create_base()
+        orig_model.load_state_dict(torch.load(base_model_path), strict=False)
+        orig_model.to(device)
         orig_model.eval()
         test(orig_model, device, test_loader)
     except:
@@ -485,19 +461,19 @@ def validate_base_vs_tuned(tuned_model :VGG, base_model_path :str, device :torch
     orig_model.eval()
     test(orig_model, device, test_loader)
 def create_base():
-    return VGG('VGG16', clamp_max=1.0, quantize_bit=32,bias =False)
+    return VGG_o('o', clamp_max=1,bias =True)
 
-def create_base_from(model :VGG, device :torch.device):
-    new_base_model = VGG('VGG16', clamp_max=1.0, quantize_bit=32,bias =False)
+def create_base_from(model :VGG_o, device :torch.device):
+    new_base_model = VGG_o('o', clamp_max=1,bias =True)
     transfer_base_params(new_base_model, model, device)
     return new_base_model
 
-def save_as_new_base(model :VGG, new_base_model_path :str, device :torch.device):
+def save_as_new_base(model :VGG_o, new_base_model_path :str, device :torch.device):
     new_base_model = create_base_from(model, device)
     torch.save(new_base_model, new_base_model_path)
     pass
 
-def evaluate_on_snn(base_model :VGG, T :int, generate_output_npy :bool, save_path :str, device :torch.device):
+def evaluate_on_snn(base_model :VGG_o, T :int, generate_output_npy :bool, save_path :str, device :torch.device):
     # pure cifar train
     transform_train_plain = transforms.Compose([
         transforms.ToTensor()
@@ -518,7 +494,7 @@ def evaluate_on_snn(base_model :VGG, T :int, generate_output_npy :bool, save_pat
     snn_loader_trainset = torch.utils.data.DataLoader(snn_dataset_trainset, batch_size=10, shuffle=False) #was shuffle=False
 
     # Initialize SNN model
-    snn_model = CatVGG('VGG16', T, bias =True).to(device)
+    snn_model = CatVGG_o('o', T,bias =True).to(device)
 
     print("model ready")
     base_model = fuse_bn_recursively(base_model)

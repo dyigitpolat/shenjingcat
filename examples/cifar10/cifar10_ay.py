@@ -5,9 +5,9 @@ def main():
     args = retrieve_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     torch.manual_seed(args.seed)
-    device = torch.device("cuda" if use_cuda else "cpu", 0)
+    device = torch.device("cuda" if use_cuda else "cpu")
 
-    base_model_path = "examples/cifar10/model88Q.bin"
+    base_model_path = "examples/cifar10/cifar10_vgg_9510.pt"
     new_base_model_path = "examples/cifar10/new_base.bin"
     snn_output_npy_path = "examples/cifar10/outputs_.npy"
     snn_loop_output_npy_path = "examples/cifar10/outputs_loop.npy"
@@ -32,12 +32,20 @@ def main():
         train_on_cifar10(model, args.batch_size, args.k, args.lr, args.gamma, args.epochs, args.log_interval, device)
     else:
         try:
-            model = torch.load(base_model_path)
+            model = create_base()
+            model.load_state_dict(torch.load(base_model_path), strict=False)
             model.eval()
         except:
             print("couldn't load base model")
             exit()
 
+    model.cpu()
+    summary(model, (3,32,32), device="cpu")
+    model.to(device)
+
+    #warm up
+    train_on_cifar10(model, args.batch_size, aug_k=3, lr=args.lr, step_gamma=args.gamma, epochs=1, log_interval=args.log_interval, device=device)
+    
     # 0
     evaluate_on_snn(
         create_base_from(model, device), 
@@ -52,7 +60,6 @@ def main():
 
     # 2
     model.eval()
-    summary(model, (3,32,32))
     train_on_snn_output(model, np.load(snn_loop_output_npy_path), args.batch_size, args.lr, args.gamma, args.epochs, args.log_interval, device)
 
     # 3
@@ -87,7 +94,6 @@ def main():
 
         # 2
         model.eval()
-        summary(model, (3,32,32))
         scaled_epochs = args.epochs
         train_on_snn_output(model, np.load(snn_loop_output_npy_path), args.batch_size, args.lr, args.gamma, scaled_epochs, args.log_interval, device)
 
